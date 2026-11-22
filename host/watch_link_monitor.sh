@@ -82,7 +82,8 @@ ensure_reverse() {
 }
 
 ensure_bridge() {
-    if "$TIMEOUT" 15 "$ADB" -s "$PHONE" shell 'ps -A' 2>/dev/null | grep -q "$PHONE_PKG"; then
+    # pidof is more reliable than parsing `ps -A` on some phones.
+    if "$TIMEOUT" 15 "$ADB" -s "$PHONE" shell "pidof $PHONE_PKG" 2>/dev/null | grep -q '[0-9]'; then
         return 0
     fi
     log "phone bridge not running - launching"
