@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
     private static final String FOCUS_PATH = "/omarchy/focus";
     private static final String CLOSE_PATH = "/omarchy/close";
     private static final String CATALOG_FILE = "catalog.json";
-    private static final int WORKSPACE_COUNT = 5;
+    private static final int DEFAULT_WORKSPACE_COUNT = 5;
 
     private GoogleApiClient mGoogleApiClient;
     private GridView mAppGrid;
@@ -55,6 +55,7 @@ public class MainActivity extends Activity {
     private TextView mWorkspaceLabel;
     private final List<AppEntry> mApps = new ArrayList<AppEntry>();
     private int mWorkspace = 1;
+    private int mWorkspaceCount = DEFAULT_WORKSPACE_COUNT;
     private boolean mCatalogReceiverRegistered;
     private boolean mWorkspaceReceiverRegistered;
 
@@ -217,6 +218,8 @@ public class MainActivity extends Activity {
                     String icon = item.optString("icon", "");
                     loaded.add(new AppEntry(id, name, icon));
                 }
+                int count = root.optInt("workspace_count", mWorkspaceCount);
+                mWorkspaceCount = count > 0 ? count : DEFAULT_WORKSPACE_COUNT;
                 setWorkspace(root.optInt("workspace", mWorkspace));
                 Log.i(TAG, "loaded " + loaded.size() + " apps from catalog v"
                         + root.optInt("version", -1));
@@ -230,18 +233,18 @@ public class MainActivity extends Activity {
     }
 
     private void cycleWorkspace(int delta) {
-        int target = ((mWorkspace - 1 + delta + WORKSPACE_COUNT) % WORKSPACE_COUNT) + 1;
+        int target = ((mWorkspace - 1 + delta + mWorkspaceCount) % mWorkspaceCount) + 1;
         Log.i(TAG, "workspace zone delta=" + delta + " target=" + target);
         setWorkspace(target);
         sendWorkspace(target);
     }
 
     private void setWorkspace(int workspace) {
-        if (workspace < 1 || workspace > WORKSPACE_COUNT) {
+        if (workspace < 1 || workspace > mWorkspaceCount) {
             return;
         }
         mWorkspace = workspace;
-        mWorkspaceLabel.setText(workspace + " / " + WORKSPACE_COUNT);
+        mWorkspaceLabel.setText(workspace + " / " + mWorkspaceCount);
     }
 
     private void requestCatalog() {

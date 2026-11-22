@@ -5,18 +5,25 @@ PROJ="$1"
 PLATFORM="$2"
 OUT="$3"
 
-SDK=/home/swab/.local/lib/android-sdk
-BT="$SDK/build-tools/30.0.3"
+CONFIG_FILE="${MOTO360_CONFIG:-$HOME/.config/moto360-launcher/env}"
+[ -r "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+
+SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/.local/lib/android-sdk}}"
+BT="$SDK/build-tools/${ANDROID_BUILD_TOOLS:-30.0.3}"
 ANDROID_JAR="$SDK/platforms/android-$PLATFORM/android.jar"
-JDK=/home/swab/.local/lib/jvm/jdk-17
+JDK="${JAVA_HOME:-$HOME/.local/lib/jvm/jdk-17}"
 export PATH="$JDK/bin:$PATH"
-AARS="${AARS_DIR:-/tmp/opencode/aars/extracted}"
+AARS="${AARS_DIR:-$HOME/.local/share/moto360-launcher/aars}"
 if [ -n "${AAR_LIST:-}" ]; then
     AARS_TO_USE="$AAR_LIST"
+elif [ "$PLATFORM" -ge 24 ]; then
+    # Modern phone build (Tasks/API split out of the wearable AAR).
+    AARS_TO_USE="play-services-wearable-18.2.0 play-services-base-18.2.0 play-services-basement-18.2.0 play-services-tasks-18.2.0 androidx-core-1.3.2 androidx-collection-1.1.0"
 else
+    # Wear 1.x build.
     AARS_TO_USE="play-services-wearable-8.4.0 play-services-base-8.4.0 play-services-basement-8.4.0 support-compat-24.2.1 support-media-compat-24.2.1 support-core-utils-24.2.1 support-core-ui-24.2.1 support-fragment-24.2.1"
 fi
-KEYSTORE=/home/swab/.local/share/moto360-launcher/debug.keystore
+KEYSTORE="${MOTO360_KEYSTORE:-$HOME/.local/share/moto360-launcher/debug.keystore}"
 
 LIBJARS=""
 for aar in $AARS_TO_USE; do

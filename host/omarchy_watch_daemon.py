@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Omarchy watch bridge: live app catalog + direct launch commands.
 
-Phone connects to tcp://127.0.0.1:9999 (normally via
-`adb reverse tcp:9999 tcp:9999`).  The daemon speaks newline-delimited JSON:
+The phone connects over TCP (normally via `adb reverse tcp:PORT tcp:PORT`).
+The daemon speaks newline-delimited JSON:
 
-  host -> phone: {"type":"catalog","version":N,"apps":[...],"workspace":N}
+  host -> phone: {"type":"catalog","version":N,"apps":[...],"workspace":N,
+                  "workspace_count":N}
   host -> phone: {"type":"workspace_state","id":N}
   phone -> host: {"type":"catalog_request"}
   phone -> host: {"type":"launch","id":"some.desktop"}
-  phone -> host: {"type":"workspace","id":1..5}
+  phone -> host: {"type":"workspace","id":1..N}
   phone -> host: {"type":"focus"}
   phone -> host: {"type":"close"}
+
+Configuration is read from the environment, optionally preloaded from
+~/.config/moto360-launcher/env (or $MOTO360_CONFIG).  See config.env.example.
 """
 
 import base64
@@ -30,11 +34,51 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, Gio, Gtk  # noqa: E402
 
-HOST = "127.0.0.1"
-PORT = 9999
+CONFIG_FILE = os.environ.get(
+    "MOTO360_CONFIG", os.path.expanduser("~/.config/moto360-launcher/env")
+)
+
+
+def _load_config():
+    """Apply KEY=VALUE lines from the local config without overriding env."""
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    os.environ.setdefault(key, value)
+    except OSError:
+        pass
+
+
+_load_config()
+
+HOST = os.environ.get("MOTO360_HOST", "127.0.0.1")
+PORT = int(os.environ.get("MOTO360_PORT", "9999"))
 ICON_SIZE = 32
-POLL_SECONDS = 2.0
-WORKSPACE_COUNT = 5
+POLL_SECONDS = float(os.environ.get("MOTO360_POLL_SECONDS", "2"))
+WORKSPACE_COUNT = int(os.environ.get("MOTO360_WORKSPACES", "5"))
+
+# The workspace/focus/close commands depend on the desktop environment.
+# Defaults match Omarchy/Hyprland; override them for another setup.
+WORKSPACE_LUA = os.environ.get(
+    "MOTO360_WORKSPACE_LUA",
+    'require("default.hypr.monitor-workspaces").focus(%d)()',
+)
+FOCUS_DISPATCH = os.environ.get(
+    "MOTO360_FOCUS_DISPATCH", "hl.dsp.window.cycle_next()"
+)
+CLOSE_DISPATCH = os.environ.get(
+    "MOTO360_CLOSE_DISPATCH", "hl.dsp.window.close()"
+)
+HYPRCTL = os.environ.get("MOTO360_HYPRCTL", "hyprctl")
+# Omarchy assigns each monitor a block of ten global workspace ids.
+WORKSPACE_BLOCK = int(os.environ.get("MOTO360_WORKSPACE_BLOCK", "10"))
 
 _client_lock = threading.Lock()
 _clients = set()
@@ -166,7 +210,7 @@ def current_workspace():
     """Return the active Hyprland workspace id, or None if unavailable."""
     try:
         result = subprocess.run(
-            ["hyprctl", "activeworkspace", "-j"],
+            [HYPRCTL, "activeworkspace", "-j"],
             check=False,
             capture_output=True,
             text=True,
@@ -175,8 +219,7 @@ def current_workspace():
         if result.returncode == 0:
             workspace_id = json.loads(result.stdout).get("id")
             if isinstance(workspace_id, int) and workspace_id > 0:
-                # Omarchy gives each monitor a block of ten global workspace ids.
-                slot = (workspace_id - 1) % 10 + 1
+                slot = (workspace_id - 1) % WORKSPACE_BLOCK + 1
                 if 1 <= slot <= WORKSPACE_COUNT:
                     return slot
     except Exception as exc:
@@ -189,15 +232,9 @@ def switch_workspace(workspace_id):
         print(f"rejected workspace id {workspace_id!r}", flush=True)
         return
     try:
-        # Omarchy exposes workspace slots through its monitor-workspaces Lua
-        # module; the plain `hyprctl dispatch workspace N` form is no longer
-        # accepted by this Hyprland version.
-        lua = (
-            'require("default.hypr.monitor-workspaces").focus(%d)()'
-            % workspace_id
-        )
+        lua = WORKSPACE_LUA % workspace_id
         result = subprocess.run(
-            ["hyprctl", "eval", lua],
+            [HYPRCTL, "eval", lua],
             check=False,
             capture_output=True,
             text=True,
@@ -218,7 +255,7 @@ def cycle_focus():
     """Focus the next window on the current workspace."""
     try:
         result = subprocess.run(
-            ["hyprctl", "dispatch", "hl.dsp.window.cycle_next()"],
+            [HYPRCTL, "dispatch", FOCUS_DISPATCH],
             check=False,
             capture_output=True,
             text=True,
@@ -237,7 +274,7 @@ def close_focused():
     """Close the currently focused window."""
     try:
         result = subprocess.run(
-            ["hyprctl", "dispatch", "hl.dsp.window.close()"],
+            [HYPRCTL, "dispatch", CLOSE_DISPATCH],
             check=False,
             capture_output=True,
             text=True,
@@ -303,6 +340,7 @@ def build_catalog():
         "version": version,
         "apps": apps,
         "workspace": workspace,
+        "workspace_count": WORKSPACE_COUNT,
     }, paths
 
 

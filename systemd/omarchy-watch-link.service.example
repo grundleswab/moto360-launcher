@@ -1,0 +1,14 @@
+[Unit]
+Description=Keep the watch-to-host launcher link alive
+After=graphical-session.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/moto360-launcher/env
+# Adjust this path to where you cloned the repository.
+ExecStart=%h/.local/share/moto360-launcher/host/watch_link_monitor.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

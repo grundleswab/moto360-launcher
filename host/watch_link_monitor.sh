@@ -7,20 +7,30 @@
 # every tap fails to reach the computer.  This monitor restores each link.
 set -u
 
-ADB=/home/swab/.local/bin/adb
-SS=/usr/bin/ss
-PYTHON=/usr/bin/python3
-TIMEOUT=/usr/bin/timeout
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${MOTO360_CONFIG:-$HOME/.config/moto360-launcher/env}"
+[ -r "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
-PHONE="${PHONE:-192.168.12.123:37605}"
-PHONE_USB="${PHONE_USB:-08041JEC216750}"
-HOST_PORT="${HOST_PORT:-9999}"
-PHONE_PKG="${PHONE_PKG:-com.example.omarchy.watch}"
-BRIDGE_ACTIVITY="${BRIDGE_ACTIVITY:-com.example.omarchy.watch/com.example.omarchy.phone.MainActivity}"
-DAEMON="${DAEMON:-/home/swab/Work/moto360-launcher/host/omarchy_watch_daemon.py}"
-DAEMON_LOG="${DAEMON_LOG:-/tmp/opencode/omarchy-daemon.log}"
-LOG="${LOG:-/tmp/opencode/watch-link-monitor.log}"
-INTERVAL="${INTERVAL:-20}"
+ADB="${ADB:-adb}"
+SS="${SS:-$(command -v ss || echo /usr/bin/ss)}"
+PYTHON="${PYTHON:-$(command -v python3 || echo /usr/bin/python3)}"
+TIMEOUT="${TIMEOUT:-$(command -v timeout || echo /usr/bin/timeout)}"
+
+# Device addresses live in the local config, never in this repository.
+PHONE="${MOTO360_PHONE:-}"
+PHONE_USB="${MOTO360_PHONE_USB:-}"
+PHONE_TCP_PORT="${MOTO360_PHONE_TCP_PORT:-${PHONE##*:}}"
+HOST_PORT="${MOTO360_PORT:-9999}"
+WATCH_FORWARD_PORT="${MOTO360_WATCH_FORWARD_PORT:-4444}"
+PHONE_PKG="${MOTO360_PHONE_PKG:-com.example.omarchy.watch}"
+BRIDGE_ACTIVITY="${MOTO360_BRIDGE_ACTIVITY:-com.example.omarchy.watch/com.example.omarchy.phone.MainActivity}"
+DAEMON="${MOTO360_DAEMON:-$SCRIPT_DIR/omarchy_watch_daemon.py}"
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/moto360-launcher"
+mkdir -p "$STATE_DIR"
+DAEMON_LOG="${MOTO360_DAEMON_LOG:-$STATE_DIR/daemon.log}"
+LOG="${MOTO360_MONITOR_LOG:-$STATE_DIR/monitor.log}"
+INTERVAL="${MOTO360_MONITOR_INTERVAL:-20}"
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
 adbq() { "$TIMEOUT" 15 "$ADB" "$@" >/dev/null 2>&1; }
@@ -43,9 +53,9 @@ ensure_phone() {
     [ "$(phone_state)" = "device" ] && { log "phone reconnected"; return 0; }
 
     # WiFi ADB listener may have gone away entirely.  USB can restart it.
-    if [ "$("$TIMEOUT" 15 "$ADB" -s "$PHONE_USB" get-state 2>/dev/null || true)" = "device" ]; then
+    if [ -n "$PHONE_USB" ] && [ "$("$TIMEOUT" 15 "$ADB" -s "$PHONE_USB" get-state 2>/dev/null || true)" = "device" ]; then
         log "WiFi ADB refused - restarting adbd TCP mode via USB"
-        adbq -s "$PHONE_USB" tcpip 37605
+        adbq -s "$PHONE_USB" tcpip "$PHONE_TCP_PORT"
         sleep 2
         adbq connect "$PHONE"
         [ "$(phone_state)" = "device" ] && { log "phone reconnected via USB"; return 0; }
@@ -83,18 +93,22 @@ ensure_watch_hub() {
     # Best-effort ADB access to the watch for debugging/firmware work.  Not
     # needed at runtime: the launcher talks to the phone over GMS.
     rules=$("$TIMEOUT" 15 "$ADB" -s "$PHONE" forward --list 2>/dev/null || true)
-    if ! printf '%s\n' "$rules" | grep -q 'tcp:4444 localabstract:/adb-hub'; then
+    if ! printf '%s\n' "$rules" | grep -q "tcp:${WATCH_FORWARD_PORT} localabstract:/adb-hub"; then
         log "watch hub forward missing - restoring"
-        adbq -s "$PHONE" forward tcp:4444 localabstract:/adb-hub
+        adbq -s "$PHONE" forward "tcp:${WATCH_FORWARD_PORT}" localabstract:/adb-hub
     fi
-    if [ "$("$TIMEOUT" 15 "$ADB" -s 127.0.0.1:4444 get-state 2>/dev/null || true)" != "device" ]; then
-        adbq disconnect 127.0.0.1:4444
-        adbq connect 127.0.0.1:4444
+    if [ "$("$TIMEOUT" 15 "$ADB" -s "127.0.0.1:${WATCH_FORWARD_PORT}" get-state 2>/dev/null || true)" != "device" ]; then
+        adbq disconnect "127.0.0.1:${WATCH_FORWARD_PORT}"
+        adbq connect "127.0.0.1:${WATCH_FORWARD_PORT}"
     fi
 }
 
 cycle() {
     ensure_daemon
+    if [ -z "$PHONE" ]; then
+        log "ERROR: MOTO360_PHONE is not configured in $CONFIG_FILE"
+        return 1
+    fi
     if ensure_phone; then
         ensure_reverse
         ensure_bridge

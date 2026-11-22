@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 # Moto 360 <-> phone <-> host bridge setup.
 #
-# Establishes the ADB-over-WiFi path to the watch (via the Pixel 4a phone)
+# Establishes the ADB-over-WiFi path to the watch (via a paired Android phone)
 # and sets up the TCP forwards/reverse used by the launcher bridge.
 #
 # Safe to re-run: tears down stale connections first. Intended to be called
-# on demand.
+# on demand.  Device addresses come from ~/.config/moto360-launcher/env.
 
 set -u
 
-PHONE_SERIAL="${PHONE_SERIAL:-192.168.12.123:37605}"
-WATCH_FORWARD_PORT="${WATCH_FORWARD_PORT:-4444}"
-HOST_BRIDGE_PORT="${HOST_BRIDGE_PORT:-9999}"
+CONFIG_FILE="${MOTO360_CONFIG:-$HOME/.config/moto360-launcher/env}"
+[ -r "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+
+PHONE_SERIAL="${MOTO360_PHONE:-}"
+WATCH_FORWARD_PORT="${MOTO360_WATCH_FORWARD_PORT:-4444}"
+HOST_BRIDGE_PORT="${MOTO360_PORT:-9999}"
 ADB="${ADB:-adb}"
+
+if [ -z "$PHONE_SERIAL" ]; then
+    echo "[watch-bridge] ERROR: set MOTO360_PHONE in $CONFIG_FILE" >&2
+    exit 1
+fi
 
 log() { echo "[watch-bridge] $*"; }
 
